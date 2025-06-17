@@ -1,0 +1,11 @@
+.save-btn { background-color: #4caf50; color: white; border: none; }
+.save-btn:hover { background-color: #388e3c; }
+
+.import-btn { background-color: #1976d2; color: white; border: none; }
+.import-btn:hover { background-color: #1565c0; }
+
+.reset-btn { background-color: #e0e0e0; color: black; border: none; }
+.reset-btn:hover { background-color: #bdbdbd; }
+
+.edit-btn, .update-btn { background-color: #ff9800; color: white; border: none; }
+.edit-btn:hover, .update-btn:hover { background-color: #f57c00; }
