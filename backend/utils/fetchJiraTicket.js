@@ -110,50 +110,70 @@ function formatADFContent(contentArray, indent = 0) {
 }
  
 /**
- * Fetches a JIRA Epic ticket and extracts details.
+ * Fetches a JIRA Epic ticket and extracts details for both RSOFT and RSOFTBMS projects.
  * @param {string} ticketId - The JIRA ticket ID to fetch.
+ * @param {string} [projectKey] - Optional project key to determine which project to fetch from.
  * @returns {Object} - Extracted JIRA details.
  */
-async function fetchJiraTicket(ticketId) {
+async function fetchJiraTicket(ticketId, projectKey = "") {
+    // Determine which project to use based on projectKey or ticketId prefix
+    const isBMS = projectKey === "RSOFTBMS" || ticketId.startsWith("RSOFTBMS-");
+    const baseUrl = isBMS ? process.env.JIRA_URL_BMS : JIRA_BASE_URL;
+    const email = isBMS ? process.env.JIRA_EMAIL_BMS : JIRA_EMAIL;
+    const token = isBMS ? process.env.JIRA_API_TOKEN_BMS : JIRA_API_TOKEN;
     try {
-        const response = await axios.get(`${JIRA_BASE_URL}/rest/api/3/issue/${ticketId}`, {
+        const response = await axios.get(`${baseUrl}/rest/api/3/issue/${ticketId}`, {
             auth: {
-                username: JIRA_EMAIL,
-                password: JIRA_API_TOKEN
+                username: email,
+                password: token
             },
             headers: { "Accept": "application/json" }
         });
- 
         const issue = response.data;
- 
-        // Extract Description
-        const descriptionData = issue.fields.description && issue.fields.description.content
-            ? extractContent(issue.fields.description.content)
-            : { text: "No Description available.", tables: [] };
-               
-        // Extract "I Want" field with formatting
-        const iWantFormatted = issue.fields.customfield_10040 && issue.fields.customfield_10040.content
-            ? formatADFContent(issue.fields.customfield_10040.content)
-            : "No 'I Want' data found.";
- 
-        // Extract "So That" Field with plain extraction
-        const soThatData = issue.fields.customfield_10041 && issue.fields.customfield_10041.content
-            ? extractContent(issue.fields.customfield_10041.content)
-            : { text: "No 'So That' data found.", tables: [] };
-       
-        // Fetch images from JIRA attachments
-        const images = issue.fields.attachment ? issue.fields.attachment.map(att => att.content) : [];
-             return {
-            ticketId: issue.key,
-            description: descriptionData.text,
-            i_want: iWantFormatted,
-            so_that: soThatData.text
-        };
-    } catch (error) {
-       return {
-            error: error.response ? JSON.stringify(error.response.data, null, 2) : error.message
-};    
+        if (isBMS) {
+            // Extract BMS fields
+            const userStorySummary = issue.fields["customfield_10129"] || "No User Story Summary";
+            const checkPoints = issue.fields["customfield_10127"] || "No Check Points";
+            const validations = issue.fields["customfield_10128"] || "No Validations";
+            const description = issue.fields.description && issue.fields.description.content
+                ? extractContent(issue.fields.description.content).text
+                : "No Description available.";
+            const images = issue.fields.attachment ? issue.fields.attachment.map(att => att.content) : [];
+            return {
+                ticketId: issue.key,
+                user_story_summary: userStorySummary,
+                check_points: checkPoints,
+                description,
+                validations,
+                images,
+                projectKey: "RSOFTBMS"
+            };
+        } else {
+            // Extract RSOFT fields
+            const descriptionData = issue.fields.description && issue.fields.description.content
+                ? extractContent(issue.fields.description.content)
+                : { text: "No Description available.", tables: [] };
+            const iWantFormatted = issue.fields.customfield_10040 && issue.fields.customfield_10040.content
+                ? formatADFContent(issue.fields.customfield_10040.content)
+                : "No 'I Want' data found.";
+            const soThatData = issue.fields.customfield_10041 && issue.fields.customfield_10041.content
+                ? extractContent(issue.fields.customfield_10041.content)
+                : { text: "No 'So That' data found.", tables: [] };
+            const images = issue.fields.attachment ? issue.fields.attachment.map(att => att.content) : [];
+            return {
+                ticketId: issue.key,
+                description: descriptionData.text,
+                i_want: iWantFormatted,
+                so_that: soThatData.text,
+                images,
+                projectKey: "RSOFT"
+            };
         }
+    } catch (error) {
+        return {
+            error: error.response ? JSON.stringify(error.response.data, null, 2) : error.message
+        };
+    }
 }
  
 // Export the function for use in other files

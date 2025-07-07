@@ -29,7 +29,18 @@ async function createTestScenario() {
             fields: {
                 project: { key: "RST" },
                 summary: "Automated Test Case",
-                description: "This is a test case created via API.",
+                description: {
+                    type: "doc",
+                    version: 1,
+                    content: [
+                        {
+                            type: "paragraph",
+                            content: [
+                                { type: "text", text: "This is a test case created via API." }
+                            ]
+                        }
+                    ]
+                },
                 issuetype: { name: "Test" }
             }
         };

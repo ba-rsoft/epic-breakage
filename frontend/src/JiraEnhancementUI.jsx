@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Progress } from "antd";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { ImportOutlined, ReloadOutlined, DownOutlined, EditOutlined, CloudUploadOutlined, CheckOutlined } from '@ant-design/icons';
 import {
     Alert,
@@ -31,6 +31,7 @@ const JiraEnhancementUI = () => {
     const [importedEnhancementIds, setImportedEnhancementIds] = useState([]);
     const [showImportedModal, setShowImportedModal] = useState(false);
     const {ticketId } = useParams();
+    const location = useLocation();
     const [customPrompt, setCustomPrompt] = useState("");
     const [selectedEnhancements, setSelectedEnhancements] = useState([]);
     const [selectAll, setSelectAll] = useState(false);
@@ -67,6 +68,15 @@ const JiraEnhancementUI = () => {
         }
     }, [ticketId]);
  
+    useEffect(() => {
+        // Auto-select project based on route
+        if (location.pathname.startsWith("/enhancements/")) {
+            setJiraProjectKey("RSOFT");
+        } else if (location.pathname.startsWith("/stories/")) {
+            setJiraProjectKey("RSOFTBMS");
+        }
+    }, [location.pathname]);
+ 
     const fetchEnhancements = async (forceRegenerate = false) => {
         if (!ticketId) {
             message.warning("No Epic ticket ID provided.");
@@ -81,21 +91,22 @@ const JiraEnhancementUI = () => {
                 setLoading(false);
                 return;
             }
+            // Ensure correct endpoint and params for RSOFTBMS
             if (customPrompt.trim() !== "") {
                 response = await axios.post(`${baseURL}/api/generate-enhancements`, {
                     ticketIds: [ticketId],
-                    customPrompts: { [ticketId]: customPrompt }
+                    customPrompts: { [ticketId]: customPrompt },
+                    projectKey: jiraProjectKey // Pass project key for backend to distinguish
                 });
             } else {
                 const url = `${baseURL}/api/enhancements/${ticketId}${forceRegenerate ? '?force=true' : ''}`;
-                response = await axios.get(url);
+                response = await axios.get(url, { params: { projectKey: jiraProjectKey } });
             }
-            const enhancementsData = response.data.enhancements || [];
-            console.log('API Response:', response.data)
+            const enhancementsData = response.data.enhancements || response.data.stories || [];
             setEnhancements(enhancementsData);
-            message.success("Enhancements generated successfully!");
+            message.success(isBMS ? "Stories generated successfully!" : "Enhancements generated successfully!");
         } catch (error) {
-            message.error("Failed to fetch enhancements.");
+            message.error(isBMS ? "Failed to fetch stories." : "Failed to fetch enhancements.");
         } finally {
             setLoading(false);
         }
@@ -111,21 +122,22 @@ const JiraEnhancementUI = () => {
             setImporting(true);
             setProgress(10);
             setProgressMessage("Starting import...");
+            // Pass projectKey for backend to distinguish
             const response = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/api/import-enhancements`, {
                 enhancements: selectedEnhancements,
                 projectKey: jiraProjectKey
             });
             if (response.data.success) {
-                const ids = response.data.importedEnhancementIds;
+                const ids = isBMS ? response.data.importedStoryIds : response.data.importedEnhancementIds;
                 setImportedEnhancementIds(Array.isArray(ids) ? ids : []);
                 setImportSuccessModal(true);
             } else {
-                message.error("JIRA import failed.");
+                message.error(isBMS ? "JIRA story import failed." : "JIRA enhancement import failed.");
                 setProgress(0);
                 setProgressMessage("Import failed.");
             }
         } catch (error) {
-            message.error("Failed to import enhancements to JIRA.");
+            message.error(isBMS ? "Failed to import stories to JIRA." : "Failed to import enhancements to JIRA.");
             setProgress(0);
             setProgressMessage("Import failed.");
         } finally {
@@ -190,6 +202,34 @@ const JiraEnhancementUI = () => {
         </Card>
     );
  
+    // Render fields based on project key
+    const isBMS = jiraProjectKey === "RSOFTBMS";
+ 
+    const extractPlainText = (value) => {
+    if (typeof value === "string") return value;
+ 
+    if (
+        typeof value === "object" &&
+        value !== null &&
+        value.type === "doc" &&
+        Array.isArray(value.content)
+    ) {
+        const extractFromContent = (contentArray) => {
+            return contentArray
+                .map(item => {
+                    if (item.type === "text") return item.text;
+                    if (item.content) return extractFromContent(item.content);
+                    return '';
+                })
+                .join(' ');
+        };
+ 
+        return extractFromContent(value.content);
+    }
+ 
+    return "";
+};
+ 
     return (
         <div
             style={{
@@ -245,28 +285,7 @@ const JiraEnhancementUI = () => {
                 </Text>
             </Card>
  
-            <Card bordered={false} style={{ marginBottom: 24 }}>
-                <Space direction="vertical" size="large" style={{ width: "100%" }}>
-                    <div>
-                        <Title level={4} style={{ marginBottom: 8, color: "#1890ff" }}>
-                            Select JIRA Project
-                        </Title>
-                        <Select
-                            value={jiraProjectKey}
-                            style={{ width: 200 }}
-                            onChange={(value) => setJiraProjectKey(value)}
-                            placeholder="Choose a project"
-                        >
-                            <Option value="RSOFT">RSOFT</Option>
-                            <Option value="COLLAPP">COLLAPP</Option>
-                            <Option value="LCOPANELAP">LCOPANELAP</Option>
-                            <Option value="MYC">MYC</Option>
-                            <Option value="PAYTV">PAYTV</Option>
-                        </Select>
-                    </div>
-                    {renderCustomPrompt()}
-                </Space>
-            </Card>
+            {renderCustomPrompt()}
  
             <Row gutter={16} style={{ marginTop: 24, marginBottom: 16 }}>
                 <Col span={5}>
@@ -276,10 +295,12 @@ const JiraEnhancementUI = () => {
                         icon={<ReloadOutlined />}
                         onClick={() => fetchEnhancements(true)}
                         disabled={loading}
-                        aria-label="Re-generate enhancements"
+                        aria-label={jiraProjectKey === "RSOFTBMS" ? "Re-generate stories" : "Re-generate enhancements"}
                         style={{ color: '#1890ff', borderColor: '#1890ff', backgroundColor: '#fff' }}
                     >
-                        <span style={{ marginLeft: 8 }}>Re-generate Enhancements</span>
+                        <span style={{ marginLeft: 8 }}>
+                            {jiraProjectKey === "RSOFTBMS" ? "Re-generate Stories" : "Re-generate Enhancements"}
+                        </span>
                     </Button>
                 </Col>
                 <Col span={5}>
@@ -289,10 +310,10 @@ const JiraEnhancementUI = () => {
                         icon={<CloudUploadOutlined />}
                         onClick={importToJira}
                         loading={importing}
-                        aria-label="Import enhancements to JIRA"
+                        aria-label={isBMS ? "Import stories to JIRA" : "Import enhancements to JIRA"}
                         style={{ color: '#fff' }}
                     >
-                        <span style={{ marginLeft: 8 }}>Import Enhancements to JIRA</span>
+                        <span style={{ marginLeft: 8 }}>{isBMS ? 'Import Stories to JIRA' : 'Import Enhancements to JIRA'}</span>
                     </Button>
                 </Col>
             </Row>
@@ -304,7 +325,7 @@ const JiraEnhancementUI = () => {
             )}
  
             <Text strong style={{ fontSize: "16px", color: "#1890ff", marginTop: "10px", marginRight: "10px" }}>
-                Enhancements Count: {enhancements.length}
+                {isBMS ? 'Stories' : 'Enhancements'} Count: {enhancements.length}
             </Text>
  
             {enhancements.length > 0 && (
@@ -313,7 +334,7 @@ const JiraEnhancementUI = () => {
                     onChange={handleSelectAll}
                     style={{ alignSelf: "center" }}
                 >
-                    Select All
+                    Select All {isBMS ? 'Stories' : 'Enhancements'}
                 </Checkbox>
             )}
  
@@ -343,10 +364,10 @@ const JiraEnhancementUI = () => {
                 </div>
  
             <div className="enhancements-container">
-                {enhancements.length > 0 ? (
+                {enhancements && enhancements.length > 0 ? (
                     <Row gutter={[16, 16]}>
                         {enhancements.map((enh, index) => (
-                            <Col key={enh.enhancement_id} xs={24} sm={12}>
+                            <Col key={isBMS ? enh.story_id : enh.enhancement_id} xs={24} sm={12}>
                                 <Card
                                     hoverable
                                     style={{
@@ -369,73 +390,140 @@ const JiraEnhancementUI = () => {
                                             </div>
                                         </Col>
                                         <Col flex="auto">
-                                            <Title level={5}>Enhancement Summary</Title>
-                                            {isEditingAll ? (
-                                                <Input.TextArea
-                                                    value={editedEnhancements[index]?.summary || ""}
-                                                    onChange={(e) =>
-                                                        handleFieldChange(index, "summary", e.target.value)
-                                                    }
-                                                    autoSize={{ minRows: 2, maxRows: 4 }}
-                                                />
+                                            {isBMS ? (
+                                                <>
+                                                    <Title level={5}>Summary</Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.summary || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "summary", e.target.value)
+                                                            }
+                                                            autoSize={{ minRows: 2, maxRows: 4 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{extractPlainText(enh.summary)}</Text>
+                                                    )}
+                                                    <Title level={5}>User Story Summary</Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.user_story_summary || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "user_story_summary", e.target.value)
+                                                            }
+                                                            autoSize={{ minRows: 2, maxRows: 4 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{extractPlainText(enh.user_story_summary)}</Text>
+                                                    )}
+                                                    <Title level={5} style={{ marginTop: 12 }}>
+                                                        Description
+                                                    </Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.description || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "description", e.target.value)
+                                                            }
+                                                            autoSize={{ minRows: 2, maxRows: 4 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{extractPlainText(enh.description)}</Text>
+                                                    )}
+                                                    <Divider style={{ marginTop: 12, marginBottom: 12 }} />
+                                                    <Title level={5}>Check Points</Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.check_points || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "check_points", e.target.value)
+                                                            }
+                                                            style={{ marginBottom: 8 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{extractPlainText(enh.check_points)}</Text>
+                                                    )}
+                                                    <Title level={5}>Validations</Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.validations || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "validations", e.target.value)
+                                                            }
+                                                            style={{ marginBottom: 8 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{extractPlainText(enh.validations)}</Text>
+                                                    )}
+                                                </>
                                             ) : (
-                                                <Text>{enh.summary}</Text>
-                                            )}
+                                                <>
+                                                    <Title level={5}>Enhancement Summary</Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.summary || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "summary", e.target.value)
+                                                            }
+                                                            autoSize={{ minRows: 2, maxRows: 4 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{extractPlainText(enh.summary)}</Text>
+                                                    )}
+                                                    <Title level={5} style={{ marginTop: 12 }}>
+                                                        Description
+                                                    </Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.description || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "description", e.target.value)
+                                                            }
+                                                            autoSize={{ minRows: 2, maxRows: 4 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{typeof enh.description === "string" ? enh.description : "Invalid description format"}</Text>
  
-                                            <Title level={5} style={{ marginTop: 12 }}>
-                                                Description
-                                            </Title>
-                                            {isEditingAll ? (
-                                                <Input.TextArea
-                                                    value={editedEnhancements[index]?.description || ""}
-                                                    onChange={(e) =>
-                                                        handleFieldChange(index, "description", e.target.value)
-                                                    }
-                                                    autoSize={{ minRows: 2, maxRows: 4 }}
-                                                />
-                                            ) : (
-                                                <Text>{enh.description}</Text>
-                                            )}
+                                                    )}
+                                                    <Divider style={{ marginTop: 12, marginBottom: 12 }} />
+                                                    <Title level={5}>i_want</Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.i_want || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "i_want", e.target.value)
+                                                            }
+                                                            style={{ marginBottom: 8 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{extractPlainText(enh.i_want)}</Text>
+                                                    )}
+                                                    <Title level={5}>so_that</Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.so_that || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "so_that", e.target.value)
+                                                            }
+                                                            style={{ marginBottom: 8 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{extractPlainText(enh.so_that)}</Text>                                            
+                                                    )}
  
-                                            <Divider style={{ marginTop: 12, marginBottom: 12 }} />
- 
-                                            <Title level={5}>i_want</Title>
-                                            {isEditingAll ? (
-                                                <Input.TextArea
-                                                    value={editedEnhancements[index]?.i_want || ""}
-                                                    onChange={(e) =>
-                                                        handleFieldChange(index, "i_want", e.target.value)
-                                                    }
-                                                    style={{ marginBottom: 8 }}
-                                                />
-                                            ) : (
-                                                <Text>{enh.i_want}</Text>
-                                            )}
- 
-                                            <Title level={5}>so_that</Title>
-                                            {isEditingAll ? (
-                                                <Input.TextArea
-                                                    value={editedEnhancements[index]?.so_that || ""}
-                                                    onChange={(e) =>
-                                                        handleFieldChange(index, "so_that", e.target.value)
-                                                    }
-                                                    style={{ marginBottom: 8 }}
-                                                />
-                                            ) : (
-                                                <Text>{enh.so_that}</Text>                                            
-                                            )}
-
-                                            <Title level={5}>acceptance_criteria</Title>
-                                            {isEditingAll ? (
-                                                <Input.TextArea
-                                                    value={editedEnhancements[index]?.acceptance_criteria || ""}
-                                                    onChange={(e) =>
-                                                        handleFieldChange(index, "acceptance_criteria", e.target.value)
-                                                    }
-                                                    style={{ marginBottom: 8 }}
-                                                />
-                                            ) : (
-                                                <Text>{enh.acceptance_criteria}</Text>
+                                                    <Title level={5}>acceptance_criteria</Title>
+                                                    {isEditingAll ? (
+                                                        <Input.TextArea
+                                                            value={editedEnhancements[index]?.acceptance_criteria || ""}
+                                                            onChange={(e) =>
+                                                                handleFieldChange(index, "acceptance_criteria", e.target.value)
+                                                            }
+                                                            style={{ marginBottom: 8 }}
+                                                        />
+                                                    ) : (
+                                                        <Text>{extractPlainText(enh.acceptance_criteria)}</Text>
+                                                    )}
+                                                </>
                                             )}
                                         </Col>
                                     </Row>
@@ -445,33 +533,59 @@ const JiraEnhancementUI = () => {
                     </Row>
                 ) : (
                     <Empty
-                        description="No enhancements available."
-                        style={{ marginTop: 40 }}
+                        description={
+                            <span>
+                                No enhancements found. Generate new enhancements using the form above.
+                            </span>
+                        }
+                        style={{ marginTop: 32 }}
                     />
                 )}
-                <div style={{ position: "fixed", top: "20px", right: "20px", zIndex: 3000 }}>
-                    <Button shape="circle" icon={<UpOutlined />} onClick={scrollToTop} />
-                </div>
-                <div style={{ position: "fixed", bottom: "20px", right: "20px", zIndex: 3000 }}>
-                    <Button shape="circle" icon={<DownOutlined />} onClick={scrollToBottom} />
-                </div>
- 
-                <Modal
-                    open={importSuccessModal}
-                    title="Import Successful"
-                    onOk={() => setImportSuccessModal(false)}
-                    onCancel={() => setImportSuccessModal(false)}
-                    okText="OK"
-                    cancelButtonProps={{ style: { display: "none" } }}
-                >
-                    <p><strong>✅ The following Enhancement IDs have been successfully imported:</strong></p>
-                    <ul>
-                        {(importedEnhancementIds || []).map((id) => (
-                            <li key={id}>{id}</li>
-                        ))}
-                    </ul>
-                </Modal>
             </div>
+            <Modal
+                visible={importSuccessModal}
+                title={isBMS ? "Import Success (Stories)" : "Import Success (Enhancements)"}
+                onCancel={() => setImportSuccessModal(false)}
+                footer={[
+                    <Button key="close" onClick={() => setImportSuccessModal(false)}>
+                        Close
+                    </Button>
+                ]}
+            >
+                <p>
+                    Successfully imported the following {isBMS ? 'stories' : 'enhancements'} to JIRA:
+                </p>
+                <ul>
+                    {importedEnhancementIds?.map((id) => (
+                        <li key={id}>
+                            <a
+                                href={
+                                    isBMS
+                                        ? `https://rsoftbms.atlassian.net/browse/${id}`
+                                        : `https://reliablesoft.atlassian.net/browse/${id}`
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ textDecoration: 'underline' }}
+                            >
+                                <Text code>{id}</Text>
+                            </a>
+                        </li>
+                    ))}
+                </ul>
+                <Button
+                    type="link"
+                    onClick={() => {
+                        importedEnhancementIds.forEach((id) => {
+                            const url = isBMS
+                                ? `https://rsoftbms.atlassian.net/browse/${id}`
+                                : `https://reliablesoft.atlassian.net/browse/${id}`;
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                        });
+                    }}
+            >
+                </Button>
+            </Modal>
         </div>
     );
 };

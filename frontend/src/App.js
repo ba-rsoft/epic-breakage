@@ -34,6 +34,7 @@ function App() {
         <Content style={{ padding: '24px', minHeight: 'calc(100vh - 64px)' }}>
           <Routes>
             <Route path="/enhancements/:ticketId" element={<JiraEnhancementUI />} />
+            <Route path="/stories/:ticketId" element={<JiraEnhancementUI isBMS={true} />} />
             <Route path="/" element={<HomePage />} />
           </Routes>
         </Content>
